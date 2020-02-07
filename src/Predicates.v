@@ -142,4 +142,29 @@ Theorem exists1' : exists x : nat, x + 1 = 2.
   apply exists1_manual.
 Qed.
 
+Theorem exists2' : forall n m : nat, (exists x : nat, n + x = m) -> n <= m.
+  destruct 1.
+  crush.
+Qed.
+
+Theorem exists2_subproof : forall n m x : nat, n + x = m -> n <= m.
+  intros.
+  crush.
+Qed.
+
+Definition exists2_manual_correct : forall n m : nat, (exists x : nat, n + x = m) -> n <= m :=
+  (fun (local_subproof : forall n m x : nat, n + x = m -> n <= m) (n m : nat) (H : exists x : nat, n + x = m) =>
+     match H with
+     | ex_intro x H0 (*@ex_intro _ _ x H0*) => local_subproof n m x H0
+     end) exists2_subproof.
+
+
+(* Why the second is wrong? *)
+(* Definition exists2_manual_wrong : forall n m : nat, (exists x : nat, n + x = m) -> n <= m := *)
+(*   (fun (n m : nat) (H : exists x : nat, n + x = m) => *)
+(*      match H with *)
+(*      | ex_intro x H0 => exists2_subproof n m x H0 *)
+(*      end). *)
+
+  
     
