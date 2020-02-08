@@ -166,5 +166,148 @@ Definition exists2_manual_correct : forall n m : nat, (exists x : nat, n + x = m
 (*      | ex_intro x H0 => exists2_subproof n m x H0 *)
 (*      end). *)
 
-  
+Inductive isZero : nat -> Prop :=
+| IsZero : isZero 0.
+
+Theorem isZero_zero : isZero 0.
+  constructor.
+Qed.
+
+Inductive isZero' (n : nat) : Prop :=
+| IsZero_constr : isZero' n.
+
+Print eq.
+
+Inductive ex'' (A : Type) (P : A -> Prop) : Prop :=
+| ex''_constr : forall x : A, P x -> ex'' P.
+
+Inductive eq' (A : Type) (x : A) : A -> Prop :=
+| eq_refl' : eq' x x.
+
+Locate "=".
+
+Theorem trivial1 : eq' 1 1.
+  apply (eq_refl' 1).
+Qed.
+
+Theorem trivial2 : forall n : nat, eq' (S n) (S n).
+  intros.
+  apply (eq_refl' (S n)).
+Qed.
+
+Theorem trivial3' : forall n m, n = m -> S n = S m.
+  intros.
+  rewrite H.
+  reflexivity.
+Qed.
+
+Theorem trivial3'_helper : forall n, S n = S n.
+  intros.
+  apply (eq_refl (S n)).
+Qed.
+
+Definition trivial3'' : forall n m, n = m -> S n = S m :=
+  fun n m (H : n = m) =>
+    eq_ind n (fun x => S n = S x) (eq_refl (S n)) m H.
+
+(* I'm still confused about the how to do induction on inductive propositions *)
+
+Theorem isZero_plus : forall n m : nat, isZero m -> n + m = n.
+  destruct 1.
+  crush.
+Qed.
+
+Theorem isZero_contra : isZero 1 -> False.
+  inversion 1.
+
+Qed.
+
+
+Theorem isZero_contra' : isZero 1 -> 2 + 2 = 5.
+  inversion 1.
+Qed.
+
+Check isZero_ind.
+
+Inductive even : nat -> Prop :=
+| EvenO : even 0
+| EvenSS : forall n : nat, even n -> even (S (S n)).
+
+Print even_ind.
+
+Theorem even_O : even 0.
+  constructor.
+Qed.
+
+Theorem even_4 : even 4.
+  constructor; constructor; constructor.
+Qed.
+
+Hint Constructors even.
+
+Theorem even_4' : even 4.
+  auto.
+Qed.
+
+Theorem even_1_contra : even 1 -> False.
+  inversion 1.
+Qed.
+
+Theorem even_3_contra : even 3 -> False.
+  inversion 1.
+  inversion H1.
+Qed.
+
+Theorem even_plus : forall n m, even n -> even m -> even (n + m).
+  induction 1.
+  simpl; trivial.
+  intro; simpl; apply EvenSS; apply IHeven; trivial.
+Qed.
+
+Print even_ind.
+
+Lemma even_contra' : forall n', even n' -> forall n, n' = S (n + n) -> False.
+  induction 1; crush.
+  destruct n; destruct n0; crush.
+  apply (IHeven n0).
+  rewrite H0.
+  SearchRewrite (_ + S _).
+  symmetry. apply plus_n_Sm.
+  Restart.
+  Hint Rewrite <- plus_n_Sm.
+  induction 1; crush;
+    match goal with
+    | [H : S ?N = ?N0 + ?N0 |- _] => destruct N; destruct N0
+    end; crush.
+Qed.
+
+Theorem even_contra : forall n, even (S (n + n)) -> False.
+  intros; eapply even_contra'; eauto.
+Qed.
+
+Theorem even_contra'' : forall n, even (S (n + n)) -> False.
+  intros. eapply even_contra'; eauto.
+Qed.
+
+Lemma even_contra_old_style : forall n, even (S (n + n)) -> False.
+  intros. remember (S (n + n)) as n' in H.
+  generalize dependent n.
+  induction H.
+  -
+    intros. inversion Heqn'.
+  -
+    intros. 
+    destruct n0.
+    +
+      inversion Heqn'.
+    +
+      inversion Heqn'.
+      apply (IHeven n0).
+      rewrite H1.
+      symmetry. apply plus_n_Sm.
+Qed.
+
     
+    
+
+  
