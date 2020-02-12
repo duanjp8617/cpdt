@@ -207,6 +207,66 @@ Eval compute in pred_strong8 2.
 Eval compute in pred_strong8 0.
 
 
-Notation {{x | P}} := maybe (fun x => P).
+Notation "{{ x | P }}" := (maybe (fun x => P)).
 Notation "??" := (Unknown _).
-Notation "[|x|]" := (Found _ x _).
+Notation "[| x |]" := (Found _ x _).
+
+(* Notation "x <- e1 ; e2" := (match e1 with *)
+(*                              | Unkown => ?? *)
+(*                              | Found x _ => e2 *)
+(*                             end) *)
+(* (right associativity, at level 60). *)
+
+Notation "x <- e1 ; e2" := (match e1 with
+                            | Unknown => ??
+                            | Found x _ => e2
+                            end)
+                             (right associativity, at level 60).
+
+Definition double_pred : forall n1 n2 : nat, {{ p | n1 = S (fst p) /\ n2 = S (snd p) }}.
+  refine (fun n1 n2 =>
+            m1 <- pred_strong7 n1;
+            m2 <- pred_strong7 n2;
+            [| (m1, m2) |]).
+  tauto.
+Qed.
+
+Definition double_pred': forall n1 n2 : nat, maybe (fun p => n1 = S (fst p) /\ n2 = S (snd p)).
+  refine (fun n1 n2 =>
+            match pred_strong7 n1 with
+            | Unknown => Unknown _
+            | Found m1 _ => match pred_strong7 n2 with
+                            | Unknown => Unknown _
+                            | Found m2 _ => Found _ (m1, m2) _
+                            end
+            end).
+  auto.
+Qed.
+
+
+Notation "x <- e1 ; e2" :=
+  (match e1 with
+   | inright _ => inright _ _
+   | inleft (exist x _) => e2
+   end)
+    (right associativity, at level 60).
+
+Definition double_pred'' : forall n1 n2, sumor (sig (fun p => n1 = S (fst p) /\ n2 = S (snd p))) (n1 = 0 \/ n2 = 0).
+  refine (fun n1 n2 =>
+            m1 <- pred_strong8 n1;
+            m2 <- pred_strong8 n2;
+            (inleft _ (exist _ (m1, m2) _))
+         ).
+  -
+    auto.
+  -
+    auto.
+  -
+    auto.
+Qed.
+
+
+
+    
+    
+              
