@@ -265,7 +265,181 @@ Definition double_pred'' : forall n1 n2, sumor (sig (fun p => n1 = S (fst p) /\ 
     auto.
 Qed.
 
+Inductive exp : Set :=
+| Nat : nat -> exp
+| Plus : exp -> exp -> exp
+| Bool : bool -> exp
+| And : exp -> exp -> exp.
 
+Inductive type : Set := | TNat : type | TBool : type.
+
+Inductive hasType : exp -> type -> Prop :=
+| HtNat : forall n : nat, hasType (Nat n) TNat
+| HtPlus : forall e1 e2 : exp, hasType e1 TNat -> hasType e2 TNat -> hasType (Plus e1 e2) TNat
+| HtBool : forall b : bool, hasType (Bool b) TBool
+| HtAnd : forall e1 e2 : exp, hasType e1 TBool -> hasType e2 TBool -> hasType (And e1 e2) TBool.
+
+Definition eq_type_dec : forall t1 t2 : type, sumbool (t1 = t2) (t1 <> t2).
+  refine (fun t1 t2 : type =>
+            match t1, t2 with
+            | TNat, TNat => left _ _
+            | TBool, TBool => left _ _
+            | _, _ => right _ _
+            end).
+  auto. intro H; inversion H. intro H; inversion H. auto.
+Qed.
+
+Notation "x <- e1 ; e2" := (match e1 with
+                            | Unknown => ??
+                            | Found x _ => e2
+                            end)
+                             (right associativity, at level 60).
+
+Notation "e1 ;; e2" := (if e1 then e2 else Unknown _) (right associativity, at level 60).
+
+Definition typeCheck : forall e : exp, maybe (fun t : type => hasType e t).
+  refine (fix f (e : exp) :=
+            match e with
+            | Nat _ => Found _ (TNat) _
+            | Plus e1 e2 =>
+              t1 <- f e1;
+              t2 <- f e2;
+              eq_type_dec t1 TNat;;
+              eq_type_dec t2 TNat;;
+              Found _ TNat _
+            | Bool _ => Found _ (TBool) _
+            | And e1 e2 =>
+              t1 <- f e1;
+              t2 <- f e2;
+              eq_type_dec t1 TBool;;
+              eq_type_dec t2 TBool;;
+              Found _ TBool _
+            end
+         ).
+  -
+    constructor.
+  -
+    constructor. rewrite e0 in h. assumption. rewrite e3 in h0. assumption.
+  -
+    constructor.
+  -
+    constructor. rewrite e0 in h. assumption. rewrite e3 in h0. assumption.
+Qed.
+
+Definition typeCheck' : forall e : exp, maybe (fun t : type => hasType e t).
+  refine (fix f (e : exp) :=
+            match e with
+            | Nat _ => Found _ (TNat) _
+            | Plus e1 e2 =>
+              t1 <- f e1;
+              t2 <- f e2;
+              (match t1 with               
+               | TNat => match t2 with
+                         | TNat => Found _ (TNat) _
+                         | _ => Unknown _
+                         end
+               | _ => Unknown _
+               end)
+            | Bool _ => Found _ (TBool) _
+            | And e1 e2 =>
+              t1 <- f e1;
+              t2 <- f e2;
+              (match t1 with
+               | TBool => match t2 with
+                          | TBool => Found _ (TBool) _
+                          | _ => Unknown _
+                          end
+               | _ => Unknown _
+               end)
+            end).
+  -
+    constructor.
+  -
+    constructor.
+    (* We are missing some important hypothesises here, because the Coq doesn't recognize 
+the type of the match result. We should provide hints to the match, but I don't how to do it *)
+Abort.
+
+Eval compute in typeCheck (Nat 0).
+
+Extraction typeCheck.
+    
+
+Notation "e1 ;; e2" := (if e1 then e2 else inright _  _) (right associativity, at level 60).
+
+
+Notation "x <- e1 ; e2" :=
+  (match e1 with
+   | inright _ => inright _ _
+   | inleft (exist x _) => e2
+   end)
+    (right associativity, at level 60).
+
+Theorem helper : forall e t1, hasType e t1 -> forall t2, hasType e t2 -> t1 = t2.
+  induction 1; crush.
+  -
+    inversion H. reflexivity.
+  -
+    inversion H1. reflexivity.
+  -
+    inversion H. reflexivity.
+  -
+    inversion H1. reflexivity.
+Qed.
+
+
+Definition typeCheckSumor : forall e : exp, sumor (sig (fun t => hasType e t))  (forall t, ~ (hasType e t)).
+  refine (fix f (e : exp) :=
+            match e with
+            | Nat _ => inleft _ (exist _ TNat _)
+            | Plus e1 e2 =>
+              t1 <- f e1;
+              t2 <- f e2;
+              eq_type_dec t1 TNat;;
+              eq_type_dec t2 TNat;;
+              inleft _ (exist _ TNat _)
+            | Bool _ => inleft _ (exist _ TBool _)
+            | And e1 e2 =>
+              t1 <- f e1;
+              t2 <- f e2;
+              eq_type_dec t1 TBool;;
+              eq_type_dec t2 TBool;;
+              inleft _ (exist _ TBool _)
+            end
+         ).
+  -
+    constructor.
+  -
+    constructor. rewrite e0 in h. assumption. rewrite e3 in h0. assumption.
+  -
+    unfold not. intros. inversion H. apply (helper  h0) in H4. apply n in H4. assumption.
+  -
+    unfold not. intros. inversion H. apply (helper h) in H2. apply n in H2. assumption.
+  -
+    unfold not. intros. inversion H. apply n in H4. assumption.
+  -
+    unfold not. intros. inversion H. apply n in H2. assumption.
+  -
+    constructor.
+  -
+    constructor. rewrite e0 in h. assumption. rewrite e3 in h0. assumption.
+  -
+    unfold not. intros. inversion H. apply (helper h0) in H4. apply n in H4. assumption.
+  -
+    unfold not. intros. inversion H. apply (helper h) in H2. apply n in H2. assumption.
+  -
+    unfold not. intros. inversion H. apply n in H4. assumption.
+  -
+    unfold not. intros. inversion H. apply n in H2. assumption.
+Qed.
+
+    
+                 
+                             
+    
+    
+    
+              
 
     
     
