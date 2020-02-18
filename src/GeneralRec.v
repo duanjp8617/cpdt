@@ -120,6 +120,13 @@ In prose, an element [x] is accessible for a relation [R] if every element "less
 (** Absence of infinite decreasing chains implies absence of infinitely nested recursive calls, for any recursive definition that respects the well-founded relation.  The [Fix] combinator from the standard library formalizes that intuition: *)
 
   Check Fix.
+
+(* 
+forall (A : Type) (R : A -> A -> Prop) (P : A -> Prop), 
+(forall x : A, (forall y : A, R y x -> Acc R y) -> (forall y : A, R y x -> P y) -> P x) ->
+(forall x : A, Acc R x -> P x)
+ *)
+  
 (** %\vspace{-.15in}%[[
 Fix
      : forall (A : Type) (R : A -> A -> Prop),
@@ -136,6 +143,16 @@ This is an encoding of the function body.  The input [x] stands for the function
 The rest of [Fix]'s type tells us that it returns a function of exactly the type we expect, so we are now ready to use it to implement [mergeSort].  Careful readers may have noticed that [Fix] has a dependent type of the sort we met in the previous chapter.
 Before writing [mergeSort], we need to settle on a well-founded relation.  The right one for this example is based on lengths of lists. *)
 
+(*  Fix_F =  *)
+(* fun (A : Type) (R : A -> A -> Prop) (P : A -> Type) *)
+(*   (F : forall x : A, (forall y : A, R y x -> P y) -> P x) => *)
+(* fix Fix_F (x : A) (a : Acc R x) {struct a} : P x := *)
+(*   F x (fun (y : A) (h : R y x) => Fix_F y (Acc_inv a h)) *)
+(*      : forall (A : Type) (R : A -> A -> Prop) (P : A -> Type), *)
+(*        (forall x : A, (forall y : A, R y x -> P y) -> P x) -> forall x : A, Acc R x -> P x *)
+(* Fix_F P F (Rwf x) *)
+  
+
   Definition lengthOrder (ls1 ls2 : list A) :=
     length ls1 < length ls2.
 
@@ -148,7 +165,7 @@ Before writing [mergeSort], we need to settle on a well-founded relation.  The r
   Defined.
 
   Theorem lengthOrder_wf : well_founded lengthOrder.
-    red; intro; eapply lengthOrder_wf'; eauto.
+    red. intro. eapply lengthOrder_wf'. eauto.
   Defined.
 
   (** Notice that we end these proofs with %\index{Vernacular commands!Defined}%[Defined], not [Qed].  Recall that [Defined] marks the theorems as %\emph{%#<i>#transparent#</i>#%}%, so that the details of their proofs may be used during program execution.  Why could such details possibly matter for computation?  It turns out that [Fix] satisfies the primitive recursion restriction by declaring itself as _recursive in the structure of [Acc] proofs_.  This is possible because [Acc] proofs follow a predictable inductive structure.  We must do work, as in the last theorem's proof, to establish that all elements of a type belong to [Acc], but the automatic unwinding of those proofs during recursion is straightforward.  If we ended the proof with [Qed], the proof details would be hidden from computation, in which case the unwinding process would get stuck.
@@ -192,8 +209,96 @@ Before writing [mergeSort], we need to settle on a well-founded relation.  The r
         if le_lt_dec 2 (length ls)
 	  then let lss := split ls in
             merge (mergeSort (fst lss) _) (mergeSort (snd lss) _)
-	  else ls)); subst lss; eauto.
+	else ls)).
+    -
+      subst lss. apply split_wf1. assumption.
+    -
+      subst lss. apply split_wf2. assumption.
   Defined.
+
+  Definition mergeSort' : list A -> list A.
+    refine ( fun (ls : list A) =>
+               Fix_F (fun _ => list A)
+                     (fun (ls : list A)
+                          (realRecur : forall ls' : list A, lengthOrder ls' ls -> list A) =>
+                        if le_lt_dec 2 (length ls)                                     
+                        then
+                          let lss := split ls in
+                          merge (realRecur (fst lss) _) (realRecur (snd lss) _)
+                        else
+                          ls) _
+           ).
+    -
+      subst lss. apply split_wf1. assumption.
+    -
+      subst lss. apply split_wf2. assumption.
+    -
+      apply (lengthOrder_wf ls).
+  Defined.
+
+  Definition mergeSort'' : list A -> list A.
+    refine (fun ls : list A =>
+              (fix outer (ls : list A) (HAcc : Acc lengthOrder ls) : list A :=
+                 (fun (ls : list A) (inner : forall ls', lengthOrder ls' ls -> list A) =>
+                    if le_lt_dec 2 (length ls)
+                    then
+                      let lss := split ls in
+                      merge (inner (fst lss) _) (inner (snd lss) _)
+                    else
+                      ls
+                 )
+                   ls
+                   (fun (ls' : list A) (HR : lengthOrder ls' ls) => outer ls' (Acc_inv HAcc HR))
+              ) ls _).
+    -
+      subst lss. apply split_wf1. assumption.
+    -
+      subst lss. apply split_wf2. assumption.
+    -
+      apply (lengthOrder_wf ls).
+  Defined.
+
+  (* Definition mergeSort''' : list A -> list A. *)
+  (*   refine (fun ls : list A => *)
+  (*             (fix outer (ls : list A) : list A := *)
+  (*                (fun (ls : list A) (inner : list A -> list A) => *)
+  (*                   if leb (length ls) 1 *)
+  (*                   then ls *)
+  (*                   else *)
+  (*                     let lss := split ls in *)
+  (*                     merge (inner (fst lss)) (inner (snd lss)) *)
+  (*                ) *)
+  (*                  ls *)
+  (*                  (fun (ls' : list A) => outer ls')                                         *)
+  (*             ) *)
+  (*               ls).             *)
+  
+  Definition mergeSortManual1 : list A -> list A :=
+    fun ls : list A =>
+      (fix outer (ls0 : list A) (HAcc : Acc lengthOrder ls0) {struct HAcc} : 
+         list A :=
+         (fun (ls1 : list A) (inner : forall ls' : list A, lengthOrder ls' ls1 -> list A) =>
+            match le_lt_dec 2 (length ls1) with
+            | left x =>
+              let lss := split ls1 in
+              merge (inner (fst lss) (split_wf1 ls1 x)) (inner (snd lss) (split_wf2 ls1 x))
+            | right _ => ls1
+            end) ls0 (fun (ls' : list A) (HR : lengthOrder ls' ls0) => outer ls' (Acc_inv HAcc HR))) ls
+                                                                                                     (lengthOrder_wf ls).
+
+  (* Definition mergeSortManual2 : list A -> list A := *)
+  (*   fun ls : list A => *)
+  (*     (fix outer (ls0 : list A) : list A := *)
+  (*        (fun (ls1 : list A) (inner : forall ls' : list A, list A) => *)
+  (*           match leb (length ls1) 1 with *)
+  (*           | false => *)
+  (*             let lss := split ls1 in *)
+  (*             merge (inner (fst lss)) (inner (snd lss)) *)
+  (*           | true => ls1 *)
+  (*           end) ls0 (fun (ls' : list A) => outer ls')) ls. *)
+
+  
+      
 (* end thide *)
 End mergeSort.
 
