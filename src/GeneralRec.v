@@ -656,149 +656,110 @@ Theorem associativity_manual : forall A B C (m : computation A)
     reflexivity.
 Qed.
 
-    
-
-(** Now we come to the piece most directly inspired by domain theory.  We want to support general recursive function definitions, but domain theory tells us that not all definitions are reasonable; some fail to be _continuous_ and thus represent unrealizable computations.  To formalize an analogous notion of continuity for our non-termination monad, we write down the approximation relation on computation results that we have had in mind all along. *)
-
-Section lattice.
-  Variable A : Type.
+Section Lattice.
+  Variables A : Type.
 
   Definition leq (x y : option A) :=
-    forall v, x = Some v -> y = Some v.
-End lattice.
-
-(** We now have the tools we need to define a new [Fix] combinator that, unlike the one we saw in the prior section, does not require a termination proof, and in fact admits recursive definition of functions that fail to terminate on some or all inputs. *)
+    forall v : A, x = Some v -> y = Some v.
+End Lattice.
 
 Section Fix.
-
-  (** First, we have the function domain and range types. *)
-
   Variables A B : Type.
-
-  (** Next comes the function body, which is written as though it can be parameterized over itself, for recursive calls. *)
 
   Variable f : (A -> computation B) -> (A -> computation B).
 
-  (** Finally, we impose an obligation to prove that the body [f] is continuous.  That is, when [f] terminates according to one recursive version of itself, it also terminates with the same result at the same approximation level when passed a recursive version that refines the original, according to [leq]. *)
+  Hypothesis f_continuous :
+    forall v1 n x v, runTo (f v1 x) n v ->
+                     forall v2, leq (proj1_sig (v1 x) n) (proj1_sig (v2 x) n) ->
+                                runTo (f v2 x) n v.
 
-  Hypothesis f_continuous : forall n v v1 x,
-    runTo (f v1 x) n v
-    -> forall (v2 : A -> computation B),
-      (forall x, leq (proj1_sig (v1 x) n) (proj1_sig (v2 x) n))
-      -> runTo (f v2 x) n v.
-
-  (** The computational part of the [Fix] combinator is easy to define.  At approximation level 0, we diverge; at higher levels, we run the body with a functional argument drawn from the next lower level. *)
-
-  Fixpoint Fix' (n : nat) (x : A) : computation B :=
+  Fixpoint Fix' (n : nat) (x : A) : (computation B) :=
     match n with
-      | O => Bottom _
-      | S n' => f (Fix' n') x
+    | 0 => Bottom _
+    | S n' => f (Fix' n') x
     end.
 
-  (** Now it is straightforward to package [Fix'] as a computation combinator [Fix]. *)
-
-  Hint Extern 1 (_ >= _) => omega.
-  Hint Unfold leq.
-
-  Lemma Fix'_ok : forall steps n x v, proj1_sig (Fix' n x) steps = Some v
-    -> forall n', n' >= n
-      -> proj1_sig (Fix' n' x) steps = Some v.
-    unfold runTo in *; induction n; crush;
-      match goal with
-        | [ H : _ >= _ |- _ ] => inversion H; crush; eauto
-      end.
+  Lemma Fix'_ok : forall steps n x v,
+      proj1_sig (Fix' n x) steps = Some v ->
+      forall n', n' >= n -> proj1_sig (Fix' n' x) steps = Some v.
+  Proof.
+    induction n.
+    -
+      (* P 0 *)
+      intros; inversion H.
+    -
+      (* P n -> P (S n) *)
+      intros. destruct n'.
+      +
+        (* n' = 0 *)
+        inversion H0.
+      +
+        (* n' = S n *)
+        simpl.                 
+        apply f_continuous with (Fix' n).  (* analyze with f_continous *)
+        * simpl in H. assumption. (* trivial *)
+        * unfold leq. intros. apply IHn. assumption. omega. (* trivial after proving leq *)
   Qed.
-
-  Hint Resolve Fix'_ok.
-
-  Hint Extern 1 (proj1_sig _ _ = _) => simpl;
-    match goal with
-      | [ |- proj1_sig ?E _ = _ ] => eapply (proj2_sig E)
-    end.
 
   Definition Fix : A -> computation B.
-    intro x; exists (fun n => proj1_sig (Fix' n x) n); abstract run.
+    refine (fun x : A => exist _ (fun n : nat => proj1_sig (Fix' n x) n) _).
+    intros.    
+    assert(HCrit : proj1_sig (Fix' n' x) n = Some v).
+    {
+      apply (@Fix'_ok n n x v H) in H0. 
+      assumption.
+    }
+    destruct (Fix' n' x).
+    eauto.
   Defined.
 
-  (** Finally, we can prove that [Fix] obeys the expected computation rule. *)
-
-  Theorem run_Fix : forall x v,
-    run (f Fix x) v
-    -> run (Fix x) v.
-    run; match goal with
-           | [ n : nat |- _ ] => exists (S n); eauto
-         end.
+  Theorem Fix_ok : forall x v,
+      run (f Fix x) v -> run (Fix x) v.
+    intros. destruct H as [n].
+    assert(HCrit : runTo (f (Fix' n) x) n v).
+    {
+      apply f_continuous with Fix.
+      assumption.
+      simpl. unfold leq. intros.
+      destruct n.
+      -
+        inversion H0.
+      -
+        assumption.
+    }
+    exists (S n). unfold runTo. simpl.
+    destruct (f (Fix' n) x).
+    unfold runTo in HCrit; simpl in HCrit.
+    simpl.
+    apply e with n. assumption. omega.
   Qed.
+
 End Fix.
 
-(* begin hide *)
-Lemma leq_Some : forall A (x y : A), leq (Some x) (Some y)
-  -> x = y.
-  intros ? ? ? H; generalize (H _ (eq_refl _)); crush.
-Qed.
-
-Lemma leq_None : forall A (x y : A), leq (Some x) None
-  -> False.
-  intros ? ? ? H; generalize (H _ (eq_refl _)); crush.
-Qed.
-
-Ltac mergeSort' := run;
-  repeat (match goal with
-            | [ |- context[match ?E with O => _ | S _ => _ end] ] => destruct E
-          end; run);
-  repeat match goal with
-           | [ H : forall x, leq (proj1_sig (?f x) _) (proj1_sig (?g x) _) |- _ ] =>
-             match goal with
-               | [ H1 : f ?arg = _, H2 : g ?arg = _ |- _ ] =>
-                 generalize (H arg); rewrite H1; rewrite H2; clear H1 H2; simpl; intro
-             end
-         end; run; repeat match goal with
-                            | [ H : _ |- _ ] => (apply leq_None in H; tauto) || (apply leq_Some in H; subst)
-                          end; auto.
-(* end hide *)
-
-(** After all that work, it is now fairly painless to define a version of [mergeSort] that requires no proof of termination.  We appeal to a program-specific tactic whose definition is hidden here but present in the book source. *)
-
-Definition mergeSort' : forall A, (A -> A -> bool) -> list A -> computation (list A).
-  refine (fun A le => Fix
-    (fun (mergeSort : list A -> computation (list A))
-      (ls : list A) =>
-      if le_lt_dec 2 (length ls)
-	then let lss := split ls in
-          ls1 <- mergeSort (fst lss);
-          ls2 <- mergeSort (snd lss);
-          Return (merge le ls1 ls2)
-	else Return ls) _); abstract mergeSort'.
-Defined.
-
-(** Furthermore, "running" [mergeSort'] on concrete inputs is as easy as choosing a sufficiently high approximation level and letting Coq's computation rules do the rest.  Contrast this with the proof work that goes into deriving an evaluation fact for a deeply embedded language, with one explicit proof rule application per execution step. *)
-
-Lemma test_mergeSort' : run (mergeSort' leb (1 :: 2 :: 36 :: 8 :: 19 :: nil))
-  (1 :: 2 :: 8 :: 19 :: 36 :: nil).
-  exists 4; reflexivity.
-Qed.
-
-(** There is another benefit of our new [Fix] compared with the one we used in the previous section: we can now write recursive functions that sometimes fail to terminate, without losing easy reasoning principles for the terminating cases.  Consider this simple example, which appeals to another tactic whose definition we elide here. *)
-
-(* begin hide *)
-Ltac looper := unfold leq in *; run;
-  repeat match goal with
-           | [ x : unit |- _ ] => destruct x
-           | [ x : bool |- _ ] => destruct x
-         end; auto.
-(* end hide *)
-
-Definition looper : bool -> computation unit.
-  refine (Fix (fun looper (b : bool) =>
-    if b then Return tt else looper b) _); abstract looper.
-Defined.
-
-Lemma test_looper : run (looper true) tt.
-  exists 1; reflexivity.
-Qed.
-
-(** As before, proving outputs for specific inputs is as easy as demonstrating a high enough approximation level.
-   There are other theorems that are important to prove about combinators like [Return], [Bind], and [Fix].  In general, for a computation [c], we sometimes have a hypothesis proving [run c v] for some [v], and we want to perform inversion to deduce what [v] must be.  Each combinator should ideally have a theorem of that kind, for [c] built directly from that combinator.  We have omitted such theorems here, but they are not hard to prove.  In general, the domain theory-inspired approach avoids the type-theoretic "gotchas" that tend to show up in approaches that try to mix normal Coq computation with explicit syntax types.  The next section of this chapter demonstrates two alternate approaches of that sort.  In the final section of the chapter, we review the pros and cons of the different choices, coming to the conclusion that none of them is obviously better than any one of the others for all situations. *)
-
-
-                 
+Definition mergeSort' : forall (A : Type) (le : A -> A -> bool),  (list A) -> computation (list A).
+  refine ( fun (A : Type) (le : A -> A -> bool) =>
+      Fix (fun (mergeSortRec : (list A) -> computation (list A)) (ls : list A) =>
+                 match le_lt_dec 2 (length ls) with
+                 | left _ =>
+                   let lss := split ls in
+                   ls1 <- mergeSortRec (fst lss);
+                   ls2 <- mergeSortRec (snd lss);
+                   Return (merge le ls1 ls2)
+                 | right _ =>
+                   Return ls
+                 end) _).
+  intros. generalize dependent v1. generalize dependent v2.
+  induction x.
+  -
+    intros.
+    unfold runTo; simpl.
+    unfold runTo in H; simpl in H. assumption.
+  -
+    intros.
+    destruct x.
+    +
+      unfold runTo; simpl.
+      unfold runTo in H; simpl in H; assumption.
+    +
+      
+                
