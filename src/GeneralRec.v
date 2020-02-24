@@ -670,7 +670,7 @@ Section Fix.
 
   Hypothesis f_continuous :
     forall v1 n x v, runTo (f v1 x) n v ->
-                     forall v2, leq (proj1_sig (v1 x) n) (proj1_sig (v2 x) n) ->
+                     forall (v2 : A -> computation B), (forall x : A, leq (proj1_sig (v1 x) n) (proj1_sig (v2 x) n)) ->
                                 runTo (f v2 x) n v.
 
   Fixpoint Fix' (n : nat) (x : A) : (computation B) :=
@@ -748,18 +748,55 @@ Definition mergeSort' : forall (A : Type) (le : A -> A -> bool),  (list A) -> co
                  | right _ =>
                    Return ls
                  end) _).
-  intros. generalize dependent v1. generalize dependent v2.
-  induction x.
+  intros.
+  destruct (le_lt_dec 2 (length x)).
   -
-    intros.
     unfold runTo; simpl.
-    unfold runTo in H; simpl in H. assumption.
+    unfold runTo in H; simpl in H.
+    unfold leq in H0.
+    assert(H1 : forall v : list A, proj1_sig (v1 (fst (split x))) n = Some v -> proj1_sig (v2 (fst (split x))) n = Some v). apply H0.
+    assert(H2 : forall v : list A, proj1_sig (v1 (snd (split x))) n = Some v -> proj1_sig (v2 (snd (split x))) n = Some v). apply H0.        
+    destruct (v1 (fst (split x))) as [f1_1 e1_1].
+    destruct (v1 (snd (split x))) as [f1_2 e1_2].
+    destruct (v2 (fst (split x))) as [f2_1 e2_1].
+    destruct (v2 (snd (split x))) as [f2_2 e2_2].
+    destruct (f1_1 n) eqn:Eqn_f1_1.
+    +
+      simpl in H1.
+      apply H1 in Eqn_f1_1.
+      rewrite Eqn_f1_1.
+      destruct (f1_2 n) eqn:Eqn_f2_2.
+      *
+        simpl in H2.
+        apply H2 in Eqn_f2_2.
+        rewrite Eqn_f2_2.
+        assumption.
+      *
+        inversion H.
+    +
+      inversion H.
   -
-    intros.
-    destruct x.
-    +
-      unfold runTo; simpl.
-      unfold runTo in H; simpl in H; assumption.
-    +
-      
-                
+    assumption.
+Defined.
+
+Lemma testMergeSort' : run (mergeSort' leb (1 :: 2 :: 36:: 8 :: 19 :: nil)) (1 :: 2 :: 8 :: 19 :: 36 :: nil).
+  exists 4. reflexivity.
+Qed.
+
+Definition looper : bool -> computation unit.
+  refine (Fix (fun looper (b:bool) =>
+                 if b then Return tt else looper b) _).
+  intros.
+  destruct x.
+  -
+    assumption.
+  -
+    unfold leq in H0. unfold runTo in H.
+    apply H0 in H.
+    unfold runTo. assumption.
+Defined.
+
+Lemma test_looper : run (looper true) tt.
+  exists 1; reflexivity.
+Qed.
+
