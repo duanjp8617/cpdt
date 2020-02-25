@@ -799,4 +799,161 @@ Defined.
 Lemma test_looper : run (looper true) tt.
   exists 1; reflexivity.
 Qed.
+    
+
+CoInductive thunk (A : Type) : Type :=
+| Answer : A -> thunk A
+| Think : thunk A -> thunk A.
+
+
+CoFixpoint TBind A B (m1 : thunk A) (m2 : A -> thunk B) : thunk B :=
+  match m1 with
+    | Answer x => m2 x
+    | Think m1' => Think (TBind m1' m2)
+  end.
+
+CoInductive thunk_eq A : thunk A -> thunk A -> Prop :=
+| EqAnswer : forall x, thunk_eq (Answer x) (Answer x)
+| EqThinkL : forall m1 m2, thunk_eq m1 m2 -> thunk_eq (Think m1) m2
+| EqThinkR : forall m1 m2, thunk_eq m1 m2 -> thunk_eq m1 (Think m2).
+
+Section thunk_eq_coind.
+  Variable A : Type.
+  Variable P : thunk A -> thunk A -> Prop.
+
+  Hypothesis H : forall m1 m2, P m1 m2
+    -> match m1, m2 with
+         | Answer x1, Answer x2 => x1 = x2
+         | Think m1', Think m2' => P m1' m2'
+         | Think m1', _ => P m1' m2
+         | _, Think m2' => P m1 m2'
+       end.
+
+  Theorem thunk_eq_coind : forall m1 m2, P m1 m2 -> thunk_eq m1 m2.
+    cofix thunk_eq_coind; intros;
+      match goal with
+        | [ H' : P _ _ |- _ ] => specialize (H H'); clear H'
+      end; destruct m1; destruct m2; subst; repeat constructor; auto.
+  Qed.
+End thunk_eq_coind.
+
+Definition frob A (m : thunk A) : thunk A :=
+  match m with
+    | Answer x => Answer x
+    | Think m' => Think m'
+  end.
+
+Theorem frob_eq : forall A (m : thunk A), frob m = m.
+  destruct m; reflexivity.
+Qed.
+
+CoFixpoint fact (n acc : nat) : thunk nat :=
+  match n with
+  | 0 => Answer acc
+  | S n' => Think (fact n' (n * acc))
+  end.
+
+Inductive eval A : thunk A -> A -> Prop :=
+| EvalAnswer : forall x : A, eval (Answer x) x
+| EvalThink : forall t x, eval t x -> eval (Think t) x.
+
+Theorem eval_frob : forall A (t : thunk A) (x : A),
+    eval (frob t) x -> eval t x.
+  intros. rewrite (frob_eq t) in H. assumption.
+Qed.
+
+Theorem eval_fact : eval (fact 5 1) 120.
+  repeat (apply eval_frob; simpl; constructor).
+Qed.
+
+Notation "x <- m1 ; m2" := (TBind m1 (fun x => m2)) (right associativity, at level 70).
+
+(* This is unguarded *)
+(* CoFixpoint fib (n : nat) : thunk nat := *)
+(*   match n with *)
+(*   | O => Answer 0 *)
+(*   | S O => Answer 1 *)
+(*   | _ => *)
+(*     Think ( *)
+(*         fst <- fib (n - 1); *)
+(*       snd <- fib (n - 2); *)
+(*       Answer (fst + snd) ) *)
+(*   end. *)
+
+CoFixpoint fib_sub (m n prevprev prev : nat) : thunk nat :=
+  match n with
+  | 0 => Answer 0
+  | 1 => Answer 1
+  | _ =>
+    if beq_nat m n
+    then Answer (prevprev + prev)
+    else Think (fib_sub (m + 1) n (prev) (prevprev + prev))
+  end.
+
+Definition fib (n : nat) : thunk nat :=
+  fib_sub 2 n 0 1.
+
+Theorem fib_correct : eval (fib 5) 5.
+  apply eval_frob.
+  repeat (apply eval_frob; simpl; constructor).
+Qed.
+
+CoInductive comp A : Type :=
+| Ret : A -> comp A
+| Bnd : forall B, comp B -> (B -> comp A) -> comp A.
+
+Inductive exec A : comp A -> A -> Prop :=
+| ExecRet : forall x : A, exec (Ret x) x
+| ExecBnd : forall (B : Type) (m1 : comp B) (x : B) (m2 : B -> comp A) (y : A),
+    exec (A := B) m1 x -> exec (m2 x) y ->  exec (Bnd m1 m2) y.
+
+Notation "x <- m1 ; m2" := (Bnd m1 (fun x => m2)) (right associativity, at level 70).
+
+CoFixpoint mergeSort''' A (le : A -> A -> bool) (ls : list A) : comp (list A) :=
+  if le_lt_dec 2 (length ls)
+  then
+    let lss := split ls in
+    ls1 <- mergeSort''' le (fst lss);
+    ls2 <- mergeSort''' le (snd lss);
+    Ret (merge le ls1 ls2)
+  else
+    Ret ls.
+
+Definition frob_comp A (m : comp A) : comp A :=
+  match m with
+  | Ret x => Ret x
+  | Bnd B m1 m2 => Bnd m1 m2
+  end.
+
+Theorem frob_comp_eq : forall A (m : comp A), frob_comp m = m.
+  destruct m; reflexivity.
+Qed.
+
+Theorem exec_equal : forall A (m : comp A) (x : A),
+    exec (frob_comp m) x -> exec m x.
+  intros. rewrite frob_comp_eq in H. assumption.
+Qed.
+
+
+Lemma testMergeSort''' : exec (mergeSort''' leb (1 :: 2 :: 36 :: 8 :: 19 :: nil)) (1 :: 2 :: 8 :: 19 :: 36 :: nil).
+  repeat(apply exec_equal; simpl; econstructor).
+Qed.
+
+Definition curriedAdd (n : nat) := Ret (fun m : nat => Ret (n + m)).
+
+Definition testCurriedAdd := Bnd (curriedAdd 2) (fun f => f 3).
+
+Lemma testCurriedAdd' : exec testCurriedAdd 5.
+  unfold testCurriedAdd.
+  repeat (apply exec_equal; simpl; econstructor).
+Qed.
+
+
+  
+              
+
+
+
+
+
 
