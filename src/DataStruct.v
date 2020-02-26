@@ -21,168 +21,75 @@ Set Asymmetric Patterns.
 
 (** Our red-black tree example from the last chapter illustrated how dependent types enable static enforcement of data structure invariants.  To find interesting uses of dependent data structures, however, we need not look to the favorite examples of data structures and algorithms textbooks.  More basic examples like length-indexed and heterogeneous lists come up again and again as the building blocks of dependent programs.  There is a surprisingly large design space for this class of data structure, and we will spend this chapter exploring it. *)
 
-
-(** * More Length-Indexed Lists *)
-
-(** We begin with a deeper look at the length-indexed lists that began the last chapter.%\index{Gallina terms!ilist}% *)
-
 Section ilist.
   Variable A : Set.
 
   Inductive ilist : nat -> Set :=
-  | Nil : ilist O
+  | Nil : ilist 0
   | Cons : forall n, A -> ilist n -> ilist (S n).
 
-  (** We might like to have a certified function for selecting an element of an [ilist] by position.  We could do this using subset types and explicit manipulation of proofs, but dependent types let us do it more directly.  It is helpful to define a type family %\index{Gallina terms!fin}%[fin], where [fin n] is isomorphic to [{m : nat | m < n}].  The type family name stands for "finite." *)
-
-  (* EX: Define a function [get] for extracting an [ilist] element by position. *)
-
-(* begin thide *)
   Inductive fin : nat -> Set :=
-  | First : forall n, fin (S n)
+  | Find : forall n, fin (S n)
   | Next : forall n, fin n -> fin (S n).
 
-  (** An instance of [fin] is essentially a more richly typed copy of a prefix of the natural numbers.  Every element is a [First] iterated through applying [Next] a number of times that indicates which number is being selected.  For instance, the three values of type [fin 3] are [First 2], [Next (First 1)], and [Next (Next (First 0))].
-
-     Now it is easy to pick a [Prop]-free type for a selection function.  As usual, our first implementation attempt will not convince the type checker, and we will attack the deficiencies one at a time.
-     [[
   Fixpoint get n (ls : ilist n) : fin n -> A :=
     match ls with
-      | Nil => fun idx => ?
-      | Cons _ x ls' => fun idx =>
-        match idx with
-          | First _ => x
-          | Next _ idx' => get ls' idx'
+    | Nil =>
+      fun f =>
+        match f in (fin n') return (match n' with
+                                    | 0 => A
+                                    | _ => unit
+                                    end) with
+        | Find _ => tt
+        | Next _ _ => tt
         end
+    | Cons n1 x ls' => 
+      fun f =>
+        (match f in (fin n') return ((fin (pred n') -> A) -> A) with
+         | Find _ => fun _ => x
+         | Next _ f' => fun new_f => new_f f'
+         end) (get ls')
     end.
-    ]]
-    %\vspace{-.15in}%We apply the usual wisdom of delaying arguments in [Fixpoint]s so that they may be included in [return] clauses.  This still leaves us with a quandary in each of the [match] cases.  First, we need to figure out how to take advantage of the contradiction in the [Nil] case.  Every [fin] has a type of the form [S n], which cannot unify with the [O] value that we learn for [n] in the [Nil] case.  The solution we adopt is another case of [match]-within-[return], with the [return] clause chosen carefully so that it returns the proper type [A] in case the [fin] index is [O], which we know is true here; and so that it returns an easy-to-inhabit type [unit] in the remaining, impossible cases, which nonetheless appear explicitly in the body of the [match].
-    [[
-  Fixpoint get n (ls : ilist n) : fin n -> A :=
-    match ls with
-      | Nil => fun idx =>
-        match idx in fin n' return (match n' with
-                                        | O => A
-                                        | S _ => unit
-                                      end) with
-          | First _ => tt
-          | Next _ _ => tt
-        end
-      | Cons _ x ls' => fun idx =>
-        match idx with
-          | First _ => x
-          | Next _ idx' => get ls' idx'
-        end
-    end.
-    ]]
-    %\vspace{-.15in}%Now the first [match] case type-checks, and we see that the problem with the [Cons] case is that the pattern-bound variable [idx'] does not have an apparent type compatible with [ls'].  In fact, the error message Coq gives for this exact code can be confusing, thanks to an overenthusiastic type inference heuristic.  We are told that the [Nil] case body has type [match X with | O => A | S _ => unit end] for a unification variable [X], while it is expected to have type [A].  We can see that setting [X] to [O] resolves the conflict, but Coq is not yet smart enough to do this unification automatically.  Repeating the function's type in a [return] annotation, used with an [in] annotation, leads us to a more informative error message, saying that [idx'] has type [fin n1] while it is expected to have type [fin n0], where [n0] is bound by the [Cons] pattern and [n1] by the [Next] pattern.  As the code is written above, nothing forces these two natural numbers to be equal, though we know intuitively that they must be.
-
-    We need to use [match] annotations to make the relationship explicit.  Unfortunately, the usual trick of postponing argument binding will not help us here.  We need to match on both [ls] and [idx]; one or the other must be matched first.  To get around this, we apply the convoy pattern that we met last chapter.  This application is a little more clever than those we saw before; we use the natural number predecessor function [pred] to express the relationship between the types of these variables.
-    [[
-  Fixpoint get n (ls : ilist n) : fin n -> A :=
-    match ls with
-      | Nil => fun idx =>
-        match idx in fin n' return (match n' with
-                                        | O => A
-                                        | S _ => unit
-                                      end) with
-          | First _ => tt
-          | Next _ _ => tt
-        end
-      | Cons _ x ls' => fun idx =>
-        match idx in fin n' return ilist (pred n') -> A with
-          | First _ => fun _ => x
-          | Next _ idx' => fun ls' => get ls' idx'
-        end ls'
-    end.
-    ]]
-    %\vspace{-.15in}%There is just one problem left with this implementation.  Though we know that the local [ls'] in the [Next] case is equal to the original [ls'], the type-checker is not satisfied that the recursive call to [get] does not introduce non-termination.  We solve the problem by convoy-binding the partial application of [get] to [ls'], rather than [ls'] by itself. *)
-
-  Fixpoint get n (ls : ilist n) : fin n -> A :=
-    match ls with
-      | Nil => fun idx =>
-        match idx in fin n' return (match n' with
-                                        | O => A
-                                        | S _ => unit
-                                      end) with
-          | First _ => tt
-          | Next _ _ => tt
-        end
-      | Cons _ x ls' => fun idx =>
-        match idx in fin n' return (fin (pred n') -> A) -> A with
-          | First _ => fun _ => x
-          | Next _ idx' => fun get_ls' => get_ls' idx'
-        end (get ls')
-    end.
-(* end thide *)
 End ilist.
 
 Arguments Nil [A].
-Arguments First [n].
-
-(** A few examples show how to make use of these definitions. *)
+Arguments Find [n].
 
 Check Cons 0 (Cons 1 (Cons 2 Nil)).
-(** %\vspace{-.15in}% [[
-  Cons 0 (Cons 1 (Cons 2 Nil))
-     : ilist nat 3
-]]
-*)
 
-(* begin thide *)
-Eval simpl in get (Cons 0 (Cons 1 (Cons 2 Nil))) First.
-(** %\vspace{-.15in}% [[
-     = 0
-     : nat
-]]
-*)
+Eval simpl in get (Cons 0 (Cons 1 (Cons 2 Nil))) Find.
+Eval simpl in get (Cons 0 (Cons 1 (Cons 2 Nil))) (Next Find).
+Eval simpl in get (Cons 0 (Cons 1 (Cons 2 Nil))) (Next (Next Find)).
 
-Eval simpl in get (Cons 0 (Cons 1 (Cons 2 Nil))) (Next First).
-(** %\vspace{-.15in}% [[
-     = 1
-     : nat
-]]
-*)
-
-Eval simpl in get (Cons 0 (Cons 1 (Cons 2 Nil))) (Next (Next First)).
-(** %\vspace{-.15in}% [[
-     = 2
-     : nat
-]]
-*)
-(* end thide *)
-
-(* begin hide *)
-(* begin thide *)
-Definition map' := map.
-(* end thide *)
-(* end hide *)
-
-(** Our [get] function is also quite easy to reason about.  We show how with a short example about an analogue to the list [map] function. *)
 
 Section ilist_map.
   Variables A B : Set.
+
   Variable f : A -> B.
 
-  Fixpoint imap n (ls : ilist A n) : ilist B n :=
-    match ls with
-      | Nil => Nil
-      | Cons _ x ls' => Cons (f x) (imap ls')
+  Fixpoint ilist_map n (ls : ilist A n) : ilist B n :=
+    match ls in (ilist _ n) return (ilist B n) with
+    | Nil => Nil
+    | Cons n x ls' => Cons (f x) (ilist_map ls')                           
     end.
 
-  (** It is easy to prove that [get] "distributes over" [imap] calls. *)
-
-(* EX: Prove that [get] distributes over [imap]. *)
-
-(* begin thide *)
-  Theorem get_imap : forall n (idx : fin n) (ls : ilist A n),
-    get (imap ls) idx = f (get ls idx).
-    induction ls; dep_destruct idx; crush.
+  Theorem get_imap : forall n (ls : ilist A n) (fdx : fin n),
+      get (ilist_map ls) fdx = f (get ls fdx).
+    induction ls.
+    -
+      intros; simpl. inversion fdx.
+    -
+      simpl; intros; dep_destruct fdx.
+      reflexivity. apply IHls.
   Qed.
-(* end thide *)
-End ilist_map.
+End ilist_map.              
+  
 
-(** The only tricky bit is remembering to use our [dep_destruct] tactic in place of plain [destruct] when faced with a baffling tactic error message. *)
+      
+               
+
+  
+
 
 (** * Heterogeneous Lists *)
 
