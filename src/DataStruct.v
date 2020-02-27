@@ -82,112 +82,66 @@ Section ilist_map.
       simpl; intros; dep_destruct fdx.
       reflexivity. apply IHls.
   Qed.
-End ilist_map.              
-  
-
-      
-               
-
-  
-
-
-(** * Heterogeneous Lists *)
-
-(** Programmers who move to statically typed functional languages from scripting languages often complain about the requirement that every element of a list have the same type.  With fancy type systems, we can partially lift this requirement.  We can index a list type with a "type-level" list that explains what type each element of the list should have.  This has been done in a variety of ways in Haskell using type classes, and we can do it much more cleanly and directly in Coq. *)
+End ilist_map.                                       
 
 Section hlist.
   Variable A : Type.
   Variable B : A -> Type.
 
-  (* EX: Define a type [hlist] indexed by a [list A], where the type of each element is determined by running [B] on the corresponding element of the index list. *)
-
-  (** We parameterize our heterogeneous lists by a type [A] and an [A]-indexed type [B].%\index{Gallina terms!hlist}% *)
-
-(* begin thide *)
   Inductive hlist : list A -> Type :=
   | HNil : hlist nil
-  | HCons : forall (x : A) (ls : list A), B x -> hlist ls -> hlist (x :: ls).
+  | HCons : forall x ls, B x -> hlist ls -> hlist (x :: ls).
 
-  (** We can implement a variant of the last section's [get] function for [hlist]s.  To get the dependent typing to work out, we will need to index our element selectors (in type family [member]) by the types of data that they point to.%\index{Gallina terms!member}% *)
-
-(* end thide *)
-  (* EX: Define an analogue to [get] for [hlist]s. *)
-
-(* begin thide *)
-  Variable elm : A.
+  Variable elem : A.
 
   Inductive member : list A -> Type :=
-  | HFirst : forall ls, member (elm :: ls)
+  | HFirst : forall ls, member (elem :: ls)
   | HNext : forall x ls, member ls -> member (x :: ls).
 
-  (** Because the element [elm] that we are "searching for" in a list does not change across the constructors of [member], we simplify our definitions by making [elm] a local variable.  In the definition of [member], we say that [elm] is found in any list that begins with [elm], and, if removing the first element of a list leaves [elm] present, then [elm] is present in the original list, too.  The form looks much like a predicate for list membership, but we purposely define [member] in [Type] so that we may decompose its values to guide computations.
-
-     We can use [member] to adapt our definition of [get] to [hlist]s.  The same basic [match] tricks apply.  In the [HCons] case, we form a two-element convoy, passing both the data element [x] and the recursor for the sublist [mls'] to the result of the inner [match].  We did not need to do that in [get]'s definition because the types of list elements were not dependent there. *)
-
-  Fixpoint hget ls (mls : hlist ls) : member ls -> B elm :=
-    match mls with
-      | HNil => fun mem =>
-        match mem in member ls' return (match ls' with
-                                          | nil => B elm
-                                          | _ :: _ => unit
-                                        end) with
-          | HFirst _ => tt
-          | HNext _ _ _ => tt
+  Fixpoint hget (ls : list A) (hls : hlist ls) : member ls -> B elem :=
+    match hls with
+    | HNil =>
+      fun memb =>
+        match memb in (member ls') return (match ls' with
+                                           | nil => B elem
+                                           | _ => unit
+                                           end) with
+        | HFirst _ => tt
+        | _ => tt
         end
-      | HCons _ _ x mls' => fun mem =>
-        match mem in member ls' return (match ls' with
-                                          | nil => Empty_set
-                                          | x' :: ls'' =>
-                                            B x' -> (member ls'' -> B elm)
-                                            -> B elm
-                                        end) with
-          | HFirst _ => fun x _ => x
-          | HNext _ _ mem' => fun _ get_mls' => get_mls' mem'
-        end x (hget mls')
+    | HCons _ _ val rem_ls =>
+      fun memb =>
+        (match memb in (member ls') return (match ls' with
+                                            | nil => Empty_set
+                                            | x' :: ls'' =>
+                                              B x' -> (member ls'' -> B elem) -> B elem
+                                            end) with
+         | HFirst _ => fun x _ => x
+         | HNext _ _ memb' => fun _ recur => recur memb'
+         end) val (hget rem_ls)
     end.
-(* end thide *)
 End hlist.
 
-(* begin thide *)
 Arguments HNil [A B].
 Arguments HCons [A B x ls] _ _.
 
-Arguments HFirst [A elm ls].
-Arguments HNext [A elm x ls] _.
-(* end thide *)
-
-(** By putting the parameters [A] and [B] in [Type], we enable fancier kinds of polymorphism than in mainstream functional languages.  For instance, one use of [hlist] is for the simple heterogeneous lists that we referred to earlier. *)
+Arguments HFirst [A elem ls].
+Arguments HNext [A elem x ls] _.
 
 Definition someTypes : list Set := nat :: bool :: nil.
 
-(* begin thide *)
-
-Example someValues : hlist (fun T : Set => T) someTypes :=
+Example someValues : hlist (fun T : Set =>  T) someTypes :=
   HCons 5 (HCons true HNil).
 
-Eval simpl in hget someValues HFirst.
-(** %\vspace{-.15in}% [[
-     = 5
-     : (fun T : Set => T) nat
-]]
-*)
+Eval simpl in (hget someValues HFirst).
 
-Eval simpl in hget someValues (HNext HFirst).
-(** %\vspace{-.15in}% [[
-     = true
-     : (fun T : Set => T) bool
-]]
-*)
-
-(** We can also build indexed lists of pairs in this way. *)
+Eval simpl in (hget someValues (HNext HFirst)).
 
 Example somePairs : hlist (fun T : Set => T * T)%type someTypes :=
   HCons (1, 2) (HCons (true, false) HNil).
 
-(** There are many other useful applications of heterogeneous lists, based on different choices of the first argument to [hlist]. *)
-
-(* end thide *)
-
+      
+                                             
 
 (** ** A Lambda Calculus Interpreter *)
 
