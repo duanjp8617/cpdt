@@ -140,9 +140,7 @@ Eval simpl in (hget someValues (HNext HFirst)).
 Example somePairs : hlist (fun T : Set => T * T)%type someTypes :=
   HCons (1, 2) (HCons (true, false) HNil).
 
-      
-                                             
-
+                                                  
 (** ** A Lambda Calculus Interpreter *)
 
 (** Heterogeneous lists are very useful in implementing %\index{interpreters}%interpreters for functional programming languages.  Using the types and operations we have already defined, it is trivial to write an interpreter for simply typed lambda calculus%\index{lambda calculus}%.  Our interpreter can alternatively be thought of as a denotational semantics (but worry not if you are not familiar with such terminology from semantics).
@@ -239,36 +237,28 @@ Eval simpl in expDenote (App (Abs (Var HFirst)) Const) HNil.
 Section filist.
   Variable A : Set.
 
-(* begin thide *)
   Fixpoint filist (n : nat) : Set :=
     match n with
-      | O => unit
-      | S n' => A * filist n'
-    end%type.
-
-  (** We say that a list of length 0 has no contents, and a list of length [S n'] is a pair of a data value and a list of length [n']. *)
+    | O => unit
+    | S n' => A * (filist n')
+    end %type.
 
   Fixpoint ffin (n : nat) : Set :=
     match n with
-      | O => Empty_set
-      | S n' => option (ffin n')
-    end.
-
-  (** We express that there are no index values when [n = O], by defining such indices as type [Empty_set]; and we express that, at [n = S n'], there is a choice between picking the first element of the list (represented as [None]) or choosing a later element (represented by [Some idx], where [idx] is an index into the list tail).  For instance, the three values of type [ffin 3] are [None], [Some None], and [Some (Some None)]. *)
+    | O => Empty_set
+    | S n' => option (ffin n')
+    end %type.
 
   Fixpoint fget (n : nat) : filist n -> ffin n -> A :=
     match n with
-      | O => fun _ idx => match idx with end
-      | S n' => fun ls idx =>
-        match idx with
-          | None => fst ls
-          | Some idx' => fget n' (snd ls) idx'
+    | O => fun _ fdx => match fdx with end
+    | S n' =>
+      fun ls fdx =>
+        match fdx with
+        | Some fdx' => fget n' (snd ls) fdx'
+        | None => fst ls
         end
     end.
-
-  (** Our new [get] implementation needs only one dependent [match], and its annotation is inferred for us.  Our choices of data structure implementations lead to just the right typing behavior for this new definition to work out. *)
-(* end thide *)
-
 End filist.
 
 (** Heterogeneous lists are a little trickier to define with recursion, but we then reap similar benefits in simplicity of use. *)
@@ -279,70 +269,36 @@ Section fhlist.
   Variable A : Type.
   Variable B : A -> Type.
 
-(* begin thide *)
   Fixpoint fhlist (ls : list A) : Type :=
     match ls with
-      | nil => unit
-      | x :: ls' => B x * fhlist ls'
-    end%type.
+    | nil => unit
+    | x :: ls' => (B x) * (fhlist ls')
+    end.
 
-  (** The definition of [fhlist] follows the definition of [filist], with the added wrinkle of dependently typed data elements. *)
-
-  Variable elm : A.
-
+  Variable elem : A.
+  
   Fixpoint fmember (ls : list A) : Type :=
     match ls with
-      | nil => Empty_set
-      | x :: ls' => (x = elm) + fmember ls'
-    end%type.
-
-  (** The definition of [fmember] follows the definition of [ffin].  Empty lists have no members, and member types for nonempty lists are built by adding one new option to the type of members of the list tail.  While for [ffin] we needed no new information associated with the option that we add, here we need to know that the head of the list equals the element we are searching for.  We express that idea with a sum type whose left branch is the appropriate equality proposition.  Since we define [fmember] to live in [Type], we can insert [Prop] types as needed, because [Prop] is a subtype of [Type].
-
-     We know all of the tricks needed to write a first attempt at a [get] function for [fhlist]s.
-     [[
-  Fixpoint fhget (ls : list A) : fhlist ls -> fmember ls -> B elm :=
-    match ls with
-      | nil => fun _ idx => match idx with end
-      | _ :: ls' => fun mls idx =>
-        match idx with
-          | inl _ => fst mls
-          | inr idx' => fhget ls' (snd mls) idx'
-        end
-    end.
-    ]]
-    %\vspace{-.15in}%Only one problem remains.  The expression [fst mls] is not known to have the proper type.  To demonstrate that it does, we need to use the proof available in the [inl] case of the inner [match]. *)
-
-  Fixpoint fhget (ls : list A) : fhlist ls -> fmember ls -> B elm :=
-    match ls with
-      | nil => fun _ idx => match idx with end
-      | _ :: ls' => fun mls idx =>
-        match idx with
-          | inl pf => match pf with
-                        | eq_refl => fst mls
-                      end
-          | inr idx' => fhget ls' (snd mls) idx'
-        end
+    | nil => Empty_set
+    | x :: ls' => (x = elem) + (fmember ls')
     end.
 
-  (** By pattern-matching on the equality proof [pf], we make that equality known to the type-checker.  Exactly why this works can be seen by studying the definition of equality. *)
-
-  (* begin hide *)
-  (* begin thide *)
-  Definition foo := @eq_refl.
-  (* end thide *)
-  (* end hide *)
-
-  Print eq.
-  (** %\vspace{-.15in}% [[
-Inductive eq (A : Type) (x : A) : A -> Prop :=  eq_refl : x = x
-]]
-
-In a proposition [x = y], we see that [x] is a parameter and [y] is a regular argument.  The type of the constructor [eq_refl] shows that [y] can only ever be instantiated to [x].  Thus, within a pattern-match with [eq_refl], occurrences of [y] can be replaced with occurrences of [x] for typing purposes. *)
-(* end thide *)
-
+  Fixpoint fhget (ls : list A) : fhlist ls -> fmember ls -> B elem :=
+    match ls with
+    | nil => fun _ fdx => match fdx with end
+    | x :: ls' =>
+      fun fls fdx =>
+        match fdx with
+        | inl eqp => match eqp with
+                     | eq_refl => fst fls
+                     end
+        | inr fdx' => fhget ls' (snd fls) fdx'
+        end
+    end.
 End fhlist.
+      
 
-Arguments fhget [A B elm ls] _ _.
+Arguments fhget [A B elem ls] _ _.
 
 (** How does one choose between the two data structure encoding strategies we have presented so far?  Before answering that question in this chapter's final section, we introduce one further approach. *)
 
